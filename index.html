@@ -375,42 +375,47 @@ function buildReason(m, mk, a) {
 
 // ── ODDS FETCH ─────────────────────────────────────────
 function fetchOdds() {
-  if(!S.oddsKey) return Promise.resolve(null);
-  var PROXIES = [
-    function(u){return 'https://api.allorigins.win/raw?url='+encodeURIComponent(u);},
-    function(u){return 'https://corsproxy.io/?'+encodeURIComponent(u);}
-  ];
-  function tryFetch(url) {
-    return fetch(url, {mode:'cors'}).then(function(r){
-      if(r.ok||r.status===401||r.status===404||r.status===422) return r;
-      throw new Error('bad status');
-    }).catch(function(){
-      var idx=0;
-      function next(){
-        if(idx>=PROXIES.length) return Promise.resolve(null);
-        return fetch(PROXIES[idx++](url)).then(function(r){return r.ok?r:next();}).catch(next);
-      }
-      return next();
+  if (!S.oddsKey) return Promise.resolve(null);
+
+  var key    = S.oddsKey.trim();
+  var sport  = S.oddsSport;
+  var region = (SPORTS[sport] || {}).region || 'eu';
+  var market = S.oddsMarket;
+
+  // Verificar key primero (no consume quota)
+  var checkUrl = 'https://api.the-odds-api.com/v4/sports/?apiKey=' + key;
+  var oddsUrl  = 'https://api.the-odds-api.com/v4/sports/' + sport
+               + '/odds/?apiKey=' + key
+               + '&regions=' + region
+               + '&markets=' + market
+               + '&oddsFormat=decimal&dateFormat=iso';
+
+  return fetch(checkUrl)
+    .then(function(r) {
+      if (r.status === 401 || r.status === 403)
+        return Promise.reject('KEY_INVALID');
+      if (r.status === 429)
+        return Promise.reject('LIMIT');
+      if (!r.ok)
+        return Promise.reject('CHECK_ERROR_' + r.status);
+      // Key OK — pedir odds
+      return fetch(oddsUrl);
+    })
+    .then(function(r) {
+      var remaining = r.headers.get('x-requests-remaining');
+      var used      = r.headers.get('x-requests-used');
+      if (r.status === 404) return {error: (SPORTS[sport]||{}).name + ' sin fixtures activos. Cambia de competicion.', noMatches:true, remaining:remaining, used:used};
+      if (r.status === 422) return {error: 'Mercado no disponible para esta liga. Prueba con 1X2.', noMatches:true, remaining:remaining, used:used};
+      if (!r.ok)            return {error: 'Error ' + r.status + ' al cargar cuotas.', remaining:remaining, used:used};
+      return r.json().then(function(data) {
+        return {data: data, remaining: remaining, used: used};
+      });
+    })
+    .catch(function(err) {
+      if (err === 'KEY_INVALID') return {error: 'API Key invalida. Copiala completa desde the-odds-api.com (sin espacios).'};
+      if (err === 'LIMIT')       return {error: 'Limite de 500 requests/mes alcanzado. Espera al proximo ciclo.'};
+      return {error: 'Error de red: ' + err + '. Abre la consola del navegador (F12) para mas detalles.'};
     });
-  }
-  var checkUrl = 'https://api.the-odds-api.com/v4/sports/?apiKey='+S.oddsKey;
-  return tryFetch(checkUrl).then(function(check){
-    if(!check) return {error:'No se pudo conectar. Sube a GitHub Pages para eliminar restricciones CORS.'};
-    if(check.status===401||check.status===403) return {error:'API Key invalida. Copiala desde the-odds-api.com'};
-    if(check.status===429) return {error:'Limite de 500 requests/mes alcanzado.'};
-    var sport  = S.oddsSport;
-    var region = (SPORTS[sport]||{}).region||'eu';
-    var url    = 'https://api.the-odds-api.com/v4/sports/'+sport+'/odds/?apiKey='+S.oddsKey+'&regions='+region+'&markets='+S.oddsMarket+'&oddsFormat=decimal&dateFormat=iso';
-    return tryFetch(url).then(function(res){
-      if(!res) return {error:'Error de red al cargar cuotas.'};
-      var remaining = res.headers.get('x-requests-remaining');
-      var used      = res.headers.get('x-requests-used');
-      if(res.status===404) return {error:(SPORTS[sport]||{}).name+' sin fixtures activos.',noMatches:true,remaining:remaining,used:used};
-      if(res.status===422) return {error:'Mercado no disponible. Prueba con 1X2.',noMatches:true,remaining:remaining,used:used};
-      if(!res.ok) return {error:'Error '+res.status};
-      return res.json().then(function(data){return {data:data,remaining:remaining,used:used};});
-    });
-  }).catch(function(e){return {error:'Error: '+e.message};});
 }
 
 function reloadOdds() {
@@ -826,20 +831,26 @@ function setGroup(g) {
   reloadOdds();
 }
 function saveOddsInline() {
-  var k=(document.getElementById('odds-key-in').value||'').trim();
-  if(!k||k.length<20){alert('Key muy corta. Copiala completa desde the-odds-api.com');return;}
-  S.oddsKey=k; localStorage.setItem('biq_odds',k); reloadOdds();
+  var input = document.getElementById('odds-key-in');
+  if (!input) return;
+  var k = input.value.trim();
+  if (!k) { alert('Ingresa tu API Key primero.'); return; }
+  if (k.length < 20) { alert('Key muy corta. Debe tener ~32 caracteres. Copiala completa desde the-odds-api.com'); return; }
+  S.oddsKey = k;
+  localStorage.setItem('biq_odds', k);
+  reloadOdds();
 }
 function openModal()  { document.getElementById('cfg-modal').classList.add('open'); }
 function closeModal() { document.getElementById('cfg-modal').classList.remove('open'); }
 function saveKeys() {
-  var fd=(document.getElementById('in-fd').value||'').trim();
-  var od=(document.getElementById('in-odds').value||'').trim();
-  if(fd){S.fdKey=fd;localStorage.setItem('biq_fd',fd);}
-  if(od){S.oddsKey=od;localStorage.setItem('biq_odds',od);}
+  var fd = (document.getElementById('in-fd').value || '').trim();
+  var od = (document.getElementById('in-odds').value || '').trim();
+  if (fd) { S.fdKey = fd;    localStorage.setItem('biq_fd', fd); }
+  if (od) { S.oddsKey = od; localStorage.setItem('biq_odds', od); }
   closeModal();
-  document.getElementById('status-txt').textContent=S.fdKey?'Conectado':'Demo';
-  if(S.tab==='odds') reloadOdds(); else render();
+  document.getElementById('status-txt').textContent = S.fdKey ? 'Conectado' : 'Demo';
+  if (od) { S.tab = 'odds'; goTab('odds'); reloadOdds(); }
+  else render();
 }
 function addBet(match, pred, prob) {
   S.bets.unshift({match:match,pred:pred,prob:prob,date:new Date().toLocaleDateString('es'),r:'P'});
