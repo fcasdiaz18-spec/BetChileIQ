@@ -551,23 +551,99 @@ function buildSuggestions(events) {
       if(mk.prob >= 0.60) {
         pool.push({
           evId: ev.id,
+          sport_key: ev.sport_key,
           match: ev.home_team + ' vs ' + ev.away_team,
+          home: ev.home_team, away: ev.away_team,
           league: (SPORTS_CFG[ev.sport_key]||{}).n || ev.sport_key,
+          group: (SPORTS_CFG[ev.sport_key]||{}).g || 'Otros',
           date: fmtDate(ev.commence_time),
           cat: mk.cat, pred: mk.name,
           prob: mk.prob, rk: mk.rk, sig: mk.sig,
-          reason: makeReason(ev, mk, a)
+          reason: makeReason(ev, mk, a),
+          analysis: a,
+          ev: ev
         });
       }
     });
   });
   pool.sort(function(a,b){return b.prob-a.prob;});
-  /* max 1 per match, up to 8 total */
-  var seen={}, out=[];
+  /* max 2 per match */
+  var matchCount={}, out=[];
   pool.forEach(function(p){
-    if(!seen[p.evId]&&out.length<8){seen[p.evId]=1;out.push(p);}
+    if(!matchCount[p.evId]) matchCount[p.evId]=0;
+    if(matchCount[p.evId]<2){ matchCount[p.evId]++; out.push(p); }
   });
   return out;
+}
+
+/* ── COMBINADA ENGINE ─────────────────────────────────────── */
+function buildCombinadas(events) {
+  /* Group best pick per sport_key/country */
+  var byGroup = {};
+  events.forEach(function(ev) {
+    var a = analyzeEvent(ev);
+    if(!a) return;
+    var grp = (SPORTS_CFG[ev.sport_key]||{}).g || 'Otros';
+    var best = null;
+    a.mkts.forEach(function(mk){
+      if(mk.prob>=0.58 && (!best||mk.prob>best.prob)) best=mk;
+    });
+    if(!best) return;
+    /* Find best bookie odds for this outcome */
+    var bestOdds = null;
+    (ev.bookmakers||[]).forEach(function(bkr){
+      var mkt=null;
+      for(var i=0;i<(bkr.markets||[]).length;i++){if(bkr.markets[i].key==='h2h'){mkt=bkr.markets[i];break;}}
+      if(!mkt) return;
+      mkt.outcomes.forEach(function(o){
+        /* map outcome name to our key */
+        var isHome = o.name===ev.home_team && best.key==='home';
+        var isAway = o.name===ev.away_team && best.key==='away';
+        var isDraw = o.name==='Draw' && best.key==='draw';
+        if(isHome||isAway||isDraw){
+          if(!bestOdds||o.price>bestOdds.price) bestOdds={price:o.price, bookie:bkr.key, title:bkr.title};
+        }
+      });
+    });
+    /* fallback odds from implied prob */
+    var fallbackOdds = bestOdds ? bestOdds.price : parseFloat((1/best.prob).toFixed(2));
+    if(!byGroup[grp]) byGroup[grp]=[];
+    byGroup[grp].push({
+      evId: ev.id,
+      match: ev.home_team+' vs '+ev.away_team,
+      home: ev.home_team, away: ev.away_team,
+      league: (SPORTS_CFG[ev.sport_key]||{}).n||ev.sport_key,
+      sport_key: ev.sport_key, group: grp,
+      date: fmtDate(ev.commence_time),
+      pick: best, odds: fallbackOdds,
+      bestBookie: bestOdds, analysis: a, ev: ev
+    });
+  });
+
+  /* Build one combinada per group */
+  var combinadas = [];
+  Object.keys(byGroup).forEach(function(grp){
+    var picks = byGroup[grp].slice().sort(function(a,b){return b.pick.prob-a.pick.prob;}).slice(0,4);
+    if(picks.length<2) return; /* need at least 2 legs */
+
+    /* Combined prob (assuming independence) */
+    var combProb = picks.reduce(function(p,x){return p*x.pick.prob;},1);
+    /* Combined odds */
+    var combOdds = picks.reduce(function(p,x){return p*x.odds;},1);
+    /* Risk level */
+    var rk = combProb>=0.50?'g':combProb>=0.35?'y':'r';
+    /* EV */
+    var ev_val = combProb*combOdds - 1;
+
+    combinadas.push({
+      group: grp, picks: picks,
+      combProb: combProb, combOdds: combOdds,
+      rk: rk, ev: ev_val
+    });
+  });
+
+  combinadas.sort(function(a,b){return b.combProb-a.combProb;});
+  return combinadas;
 }
 
 function makeReason(ev, mk, a) {
@@ -897,20 +973,21 @@ function renderDash() {
 
 function renderSugs() {
   var events = getAllEvents();
-  var sugs = APP.keyValid ? APP.sugs : buildSuggestions(events);
+  var sugs   = APP.keyValid ? APP.sugs : buildSuggestions(events);
   var filter = APP.filterCat;
-  var minP = APP.minProb;
+  var minP   = APP.minProb;
   var filtered = sugs.filter(function(s){
     return (filter==='all'||s.cat===filter) && s.prob*100>=minP;
   });
 
-  var chips = [['all','Todos'],['1X2','1X2'],['Goles','Goles'],['BTTS','BTTS'],['DC','Doble Ch.']].map(function(x){
+  var chips=[['all','Todos'],['1X2','1X2'],['Goles','Goles'],['BTTS','BTTS'],['DC','Doble Ch.']].map(function(x){
     return '<button class="chip'+(filter===x[0]?' on':'')+'" onclick="APP.filterCat=\''+x[0]+'\';render()">'+x[1]+'</button>';
   }).join('');
 
-  var cards = filtered.length ? filtered.map(function(s,i){
-    return '<div class="sug'+(i===0?' top':'')+'">'
-      +(i===0?'<div style="font-size:10px;color:var(--a2);font-weight:700;margin-bottom:8px;text-transform:uppercase;letter-spacing:.6px">⭐ Mejor pick</div>':'')
+  var cards=filtered.length?filtered.map(function(s,i){
+    var isTop=i===0;
+    return '<div class="sug'+(isTop?' top':'')+'">'
+      +(isTop?'<div style="font-size:10px;color:var(--a2);font-weight:700;margin-bottom:8px;text-transform:uppercase;letter-spacing:.6px">⭐ Mejor pick</div>':'')
       +'<div class="sug-hdr"><div class="sug-left">'
       +'<div class="sug-match">'+s.match+'</div>'
       +'<div class="sug-sub">'+s.league+' · '+s.date+'</div>'
@@ -926,7 +1003,8 @@ function renderSugs() {
       +'<button onclick="addBet(\''+s.match.replace(/'/g,'')+'\',\''+s.pred.replace(/'/g,'')+'\','+s.prob.toFixed(3)+');event.stopPropagation()"'
       +' style="padding:5px 12px;background:var(--abg);border:1px solid var(--abr);border-radius:8px;color:var(--a2);font-size:11px;font-weight:600;cursor:pointer">+ Tracker</button>'
       +'</div></div>';
-  }).join('') : '<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">Sin picks con ese filtro</div><div class="empty-sub">Ajusta los filtros o cambia el rango de probabilidad</div></div>';
+  }).join('')
+  :'<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">Sin picks con ese filtro</div><div class="empty-sub">Ajusta filtros o baja el mínimo de probabilidad</div></div>';
 
   return '<div class="sh"><div class="sh-title">Picks recomendados</div>'+refreshBtn('sugs','refreshDash()')+'</div>'
     +usageBarHtml()
