@@ -972,7 +972,8 @@ function testAndSave(){
   var k=(document.getElementById('m-odds').value||'').trim();
   var res=document.getElementById('m-res');
   if(!k||k.length<20){res.style.color='var(--red)';res.textContent='Key muy corta.';return;}
-  res.style.color='var(--t3)';res.textContent='Verificando...';
+  res.style.display='block';
+    res.style.color='var(--t3)';res.textContent='Verificando Odds API...';
   testKey(k).then(function(sports){
     A.key=k;A.kv=true;localStorage.setItem('biq_k',k);
     res.style.color='var(--green)';res.textContent='Valida - '+sports.length+' deportes.';
