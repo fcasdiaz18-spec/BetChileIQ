@@ -23,9 +23,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;background:va
 .ntab.on{color:var(--blue);border-bottom-color:var(--blue)}
 .view{padding:14px 16px;max-width:900px;margin:0 auto}
 /* MODAL */
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);z-index:500;display:none;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto}
-.overlay.on{display:flex}
-.modal-box{background:var(--bg2);border:1px solid var(--b2);border-radius:16px;padding:22px;width:100%;max-width:460px;margin:auto}
+.overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.88);backdrop-filter:blur(8px);z-index:9999;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:20px}
+.overlay.on{display:block}
+.modal-box{background:#0D1220;border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:22px;width:100%;max-width:460px;margin:20px auto 40px auto}
 .modal-box h3{font-size:16px;font-weight:800;margin-bottom:6px}
 .modal-box .sub{font-size:12px;color:var(--t2);margin-bottom:18px;line-height:1.6}
 .kb{border-radius:var(--rs);padding:14px;margin-bottom:14px}
@@ -199,20 +199,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;background:va
   <div class="modal-box">
     <h3>⚙ Configurar Fuentes de Datos</h3>
     <p class="sub">Conecta hasta 2 APIs gratuitas. La primera es obligatoria, la segunda enriquece el analisis con tablas y forma real.</p>
-    <div class="kb odds">
-      <div class="kb-title blue">① The Odds API — Cuotas en vivo</div>
-      <div class="kb-desc">Cuotas de 40+ casas (Betano, Bet365, Pinnacle). 500 requests/mes gratis.<br><a href="https://the-odds-api.com" target="_blank">Registrate gratis aqui →</a></div>
-      <input class="ki" id="in-odds" type="text" placeholder="Pega tu Odds API key (~32 caracteres)">
+    <!-- FUENTE 1 -->
+    <div style="background:rgba(56,191,255,.08);border:1px solid rgba(56,191,255,.3);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:700;color:#38BFFF;margin-bottom:5px">① The Odds API — Cuotas en vivo</div>
+      <div style="font-size:11px;color:#50597A;margin-bottom:10px;line-height:1.6">40+ casas (Betano, Bet365, Pinnacle). 500 requests/mes gratis.<br><a href="https://the-odds-api.com" target="_blank" style="color:#38BFFF;text-decoration:none">Registrate gratis en the-odds-api.com →</a></div>
+      <input id="in-odds" type="text" placeholder="Pega aqui tu Odds API key..."
+        style="width:100%;background:#1A2035;border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:11px 13px;color:#EEF3FF;font-size:13px;outline:none;font-family:inherit;display:block">
     </div>
-    <div class="kb fd">
-      <div class="kb-title grn">② football-data.org — Tablas y forma real</div>
-      <div class="kb-desc">Posicion en tabla, forma reciente, resultados. Mejora el modelo Poisson.<br><a href="https://www.football-data.org/client/register" target="_blank">Registrate gratis aqui →</a></div>
-      <input class="ki" id="in-fd" type="text" placeholder="Pega tu football-data key (opcional)">
+    <!-- FUENTE 2 -->
+    <div style="background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.25);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:700;color:#00E676;margin-bottom:5px">② football-data.org — Tablas y forma real</div>
+      <div style="font-size:11px;color:#50597A;margin-bottom:10px;line-height:1.6">Posicion en tabla, forma reciente, resultados reales. Mejora el modelo.<br><a href="https://www.football-data.org/client/register" target="_blank" style="color:#38BFFF;text-decoration:none">Registrate gratis en football-data.org →</a></div>
+      <input id="in-fd" type="text" placeholder="Pega aqui tu football-data.org key (opcional)..."
+        style="width:100%;background:#1A2035;border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:11px 13px;color:#EEF3FF;font-size:13px;outline:none;font-family:inherit;display:block">
     </div>
-    <div class="mres" id="mres"></div>
-    <div class="mbtns">
-      <button class="mbtn sec" onclick="closeModal()">Cancelar</button>
-      <button class="mbtn pri" onclick="saveKeys()">✓ Verificar y Guardar</button>
+    <!-- RESULTADO -->
+    <div id="mres" style="font-size:12px;padding:10px 12px;border-radius:8px;margin-bottom:14px;display:none;line-height:1.6;white-space:pre-line"></div>
+    <!-- BOTONES -->
+    <div style="display:flex;gap:10px">
+      <button onclick="closeModal()" style="flex:1;padding:12px;border-radius:10px;border:none;background:#1A2035;color:#8B96BB;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Cancelar</button>
+      <button onclick="saveKeys()" style="flex:1;padding:12px;border-radius:10px;border:none;background:#38BFFF;color:#000;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">✓ Verificar y Guardar</button>
     </div>
   </div>
 </div>
@@ -742,7 +748,7 @@ function openModal(){
   var m=document.getElementById('modal');if(m)m.classList.add('on');
   var i1=document.getElementById('in-odds');if(i1&&A.okey)i1.value=A.okey;
   var i2=document.getElementById('in-fd');if(i2&&A.fdkey)i2.value=A.fdkey;
-  var r=document.getElementById('mres');if(r){r.className='mres';r.textContent='';}}
+  var r=document.getElementById('mres');if(r){r.style.display='none';r.textContent='';}}
 function closeModal(){var m=document.getElementById('modal');if(m)m.classList.remove('on');}
 
 function saveKeys(){
@@ -750,7 +756,7 @@ function saveKeys(){
   var fk=(document.getElementById('in-fd').value||'').trim();
   var res=document.getElementById('mres');
   if(!ok||ok.length<20){res.className='mres err';res.textContent='Odds API key incompleta (~32 caracteres).';return;}
-  res.className='mres load';res.textContent='Verificando The Odds API...';
+  res.style.display='block';res.style.background='rgba(56,191,255,.1)';res.style.border='1px solid rgba(56,191,255,.3)';res.style.color='#38BFFF';res.textContent='Verificando The Odds API...';
   testOK(ok).then(function(sports){
     A.okey=ok;A.ok=true;localStorage.setItem('biq_ok',ok);
     var msg='The Odds API conectada - '+sports.length+' deportes.';
@@ -758,17 +764,17 @@ function saveKeys(){
       res.textContent=msg+' Verificando football-data.org...';
       return testFD(fk).then(function(){
         A.fdkey=fk;A.fdok=true;localStorage.setItem('biq_fd',fk);
-        res.className='mres ok';res.textContent=msg+'\nfootball-data.org conectada - tablas y forma real habilitados.';
+        res.style.background='rgba(0,230,118,.1)';res.style.border='1px solid rgba(0,230,118,.25)';res.style.color='#00E676';res.textContent=msg+'\nfootball-data.org conectada - tablas y forma real habilitados.';
         upd();setTimeout(function(){closeModal();lAll();},1200);
       }).catch(function(){
         A.fdkey=fk;A.fdok=false;localStorage.setItem('biq_fd',fk);
-        res.className='mres ok';res.textContent=msg+'\nfootball-data.org no respondio. Solo se usara Odds API.';
+        res.style.background='rgba(0,230,118,.1)';res.style.border='1px solid rgba(0,230,118,.25)';res.style.color='#00E676';res.textContent=msg+'\nfootball-data.org no respondio. Solo se usara Odds API.';
         upd();setTimeout(function(){closeModal();lAll();},1300);});
     }else{
-      res.className='mres ok';res.textContent=msg;upd();setTimeout(function(){closeModal();lAll();},900);}
+      res.style.background='rgba(0,230,118,.1)';res.style.border='1px solid rgba(0,230,118,.25)';res.style.color='#00E676';res.textContent=msg;upd();setTimeout(function(){closeModal();lAll();},900);}
   }).catch(function(e){
-    A.ok=false;res.className='mres err';
-    res.textContent=e.message==='KEY_INVALID'?'Key invalida. Copiala completa desde the-odds-api.com':e.message==='LIMIT'?'Limite de 500 requests alcanzado.':'Error: '+e.message;});}
+    A.ok=false;res.style.display='block';res.style.background='rgba(255,69,69,.1)';res.style.border='1px solid rgba(255,69,69,.25)';res.style.color='#FF4545';
+    res.textContent=e.message==='KEY_INVALID'?'Key invalida. Copiala completa desde the-odds-api.com':e.message==='LIMIT'?'Limite de 500 requests/mes alcanzado.':'Error: '+e.message;});}
 
 function addBet(m,p,pr){A.bets.unshift({match:m,pred:p,prob:isNaN(pr)?0.6:pr,date:new Date().toLocaleDateString('es'),r:'P'});localStorage.setItem('biq_bets',JSON.stringify(A.bets));alert('Anadido al Tracker');}
 function addBetM(){var m=prompt('Partido:');if(!m)return;var p=prompt('Prediccion:');if(!p)return;var pb=parseFloat(prompt('Probabilidad decimal:')||'0.6');A.bets.unshift({match:m,pred:p,prob:isNaN(pb)?0.6:pb,date:new Date().toLocaleDateString('es'),r:'P'});localStorage.setItem('biq_bets',JSON.stringify(A.bets));render();}
