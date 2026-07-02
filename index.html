@@ -190,7 +190,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;background:va
   <button class="ntab"    id="nt-odds"    onclick="G('odds')">💰 Cuotas</button>
   <button class="ntab"    id="nt-scores"  onclick="G('scores')">📊 Resultados</button>
   <button class="ntab"    id="nt-news"    onclick="G('news')">📰 Noticias</button>
-  <button class="ntab"    id="nt-tracker" onclick="G('tracker')">🎯 Tracker</button>
+  <button class="ntab"    id="nt-hot"     onclick="G('hot')">🔥 Hot</button>
 </nav>
 <div class="view" id="V"></div>
 
@@ -321,11 +321,47 @@ function testOK(k){return fetch(OB+'/sports/?apiKey='+k).then(function(r){
   if(!r.ok)throw new Error('HTTP_'+r.status);return r.json();});}
 function testFD(k){return fetch(FB+'/competitions/PL/standings',{headers:{'X-Auth-Token':k}}).then(function(r){if(!r.ok)throw new Error('FD_INVALID');return r.json();});}
 
+/* ── CARGA SPORT: solo h2h garantizado, totals opcional ── */
 function lSport(sp){
-  if(!A.ok)return Promise.resolve(null);
-  var cfg=SC[sp]||{r:'eu'};A.err[sp]=null;
-  return oGet('/sports/'+sp+'/odds/?apiKey='+A.okey+'&regions='+cfg.r+'&markets=h2h,totals,btts&oddsFormat=decimal&dateFormat=iso')
-    .then(function(d){A.ev[sp]=d||[];return d;}).catch(function(e){A.ev[sp]=[];A.err[sp]=e.message;return null;});}
+  if(!A.ok) return Promise.resolve(null);
+  var cfg=SC[sp]||{r:'eu'};
+  A.err[sp]=null;
+  /* 1. Pedir SOLO h2h — siempre soportado */
+  return oGet('/sports/'+sp+'/odds/?apiKey='+A.okey+'&regions='+cfg.r+'&markets=h2h&oddsFormat=decimal&dateFormat=iso')
+    .then(function(base){
+      A.ev[sp]=base||[];
+      /* 2. Intentar totals por separado — ignorar si falla */
+      return oGet('/sports/'+sp+'/odds/?apiKey='+A.okey+'&regions='+cfg.r+'&markets=totals&oddsFormat=decimal&dateFormat=iso')
+        .then(function(tot){
+          /* Fusionar mercados totals dentro de los eventos existentes */
+          if(tot&&tot.length){
+            tot.forEach(function(tev){
+              var idx=-1;
+              for(var i=0;i<A.ev[sp].length;i++){if(A.ev[sp][i].id===tev.id){idx=i;break;}}
+              if(idx<0)return;
+              /* Agregar bookmakers de totals a los ya existentes */
+              (tev.bookmakers||[]).forEach(function(tb){
+                var found=false;
+                (A.ev[sp][idx].bookmakers||[]).forEach(function(eb){
+                  if(eb.key===tb.key){
+                    /* Agregar mercado totals a este bookmaker */
+                    (tb.markets||[]).forEach(function(tm){
+                      if(!eb.markets)eb.markets=[];
+                      var already=eb.markets.some(function(m){return m.key===tm.key;});
+                      if(!already)eb.markets.push(tm);
+                    });
+                    found=true;
+                  }
+                });
+                if(!found){if(!A.ev[sp][idx].bookmakers)A.ev[sp][idx].bookmakers=[];A.ev[sp][idx].bookmakers.push(tb);}
+              });
+            });
+          }
+          return A.ev[sp];
+        }).catch(function(){return A.ev[sp];}); /* totals fallido — continuar sin él */
+    })
+    .catch(function(e){A.ev[sp]=[];A.err[sp]=e.message;return null;});
+}
 function lScores(sp){
   if(!A.ok)return Promise.resolve(null);
   return oGet('/sports/'+sp+'/scores/?apiKey='+A.okey+'&daysFrom=3&dateFormat=iso')
@@ -400,7 +436,13 @@ function bSugs(evs){
       group:(SC[ev.sport_key]||{}).g||'Otros',date:fmtD(ev.commence_time),
       cat:mk.cat,pred:mk.name,prob:mk.prob,rk:mk.rk,sig:mk.sig,reason:bReason(ev,mk,a),an:a,ev:ev});});});
   pool.sort(function(a,b){return b.prob-a.prob;});
-  var mc={},out=[];pool.forEach(function(p){if(!mc[p.evId]&&out.length<10){mc[p.evId]=1;out.push(p);}});return out;}
+  var mc={},out=[];pool.forEach(function(p){if(!mc[p.evId]&&out.length<10){mc[p.evId]=1;out.push(p);}});
+  /* Si no hay cuotas reales, complementar con señales de football-data */
+  if(out.length<3&&A.fdok){
+    var fdSigs=signalsFromFD();
+    fdSigs.forEach(function(s){if(out.length<8)out.push(s);});
+  }
+  return out;}
 
 function bReason(ev,mk,a){
   var ip=a.ip,hP=Math.round((ip[ev.home_team]||0)*100),aP=Math.round((ip[ev.away_team]||0)*100);
@@ -570,10 +612,34 @@ function cmbH(c){
 /* RENDERS */
 function rDash(){
   if(A.ok&&A.load.all)return '<div class="lwrap"><div class="spin"></div><div class="ltxt">Cargando datos reales...</div></div>';
-  if(A.ok){var tot=allEv().length,errs=Object.keys(A.err).filter(function(k){return A.err[k];});
-    if(tot===0&&Object.keys(A.ev).length>0)return '<div class="notice warn">Key valida pero 0 partidos con cuotas activas ahora.</div>'
-      +(errs.length?'<div class="card cp" style="margin-bottom:12px">'+errs.map(function(k){return '<div class="diag"><b>'+(SC[k]||{}).n+':</b> '+A.err[k]+'</div>';}).join('')+'</div>':'')
-      +'<div style="text-align:center"><button onclick="lAll()" style="padding:10px 24px;background:var(--abg);border:1px solid var(--abr);border-radius:var(--rs);color:var(--blue);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Reintentar</button></div>';}
+  if(A.ok){
+    var tot=allEv().length;
+    var errKeys=Object.keys(A.err).filter(function(k){return A.err[k];});
+    var has404=errKeys.some(function(k){return A.err[k]&&A.err[k].indexOf('404')>=0;});
+    if(tot===0&&Object.keys(A.ev).length>0){
+      /* Mostrar diagnostico simplificado — sin asustar al usuario */
+      var activas=Object.keys(A.ev).filter(function(k){return !A.err[k];}).length;
+      var fallidas=errKeys.length;
+      return '<div class="notice info">Key valida y conectada. '+activas+' ligas consultadas sin errores, '+fallidas+' ligas sin partidos activos con cuotas ahora mismo.</div>'
+        +'<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r);padding:14px;margin-bottom:12px">'
+        +'<div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:10px">Estado por competicion</div>'
+        +Object.keys(SC).map(function(k){
+          var hasErr=A.err[k];var hasData=(A.ev[k]||[]).length>0;
+          var ico=hasData?'🟢':hasErr?'🟡':'⚪';
+          var msg=hasData?((A.ev[k]||[]).length+' partidos con cuotas'):hasErr?'Sin partidos activos ahora':'Cargando...';
+          return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--b1);font-size:11px">'
+            +'<span>'+ico+'</span>'
+            +'<span style="font-weight:600;flex:1">'+SC[k].n+'</span>'
+            +'<span style="color:var(--t3)">'+msg+'</span></div>';
+        }).join('')
+        +'</div>'
+        +'<div style="background:var(--ybg);border:1px solid var(--ybr);border-radius:var(--rs);padding:12px;font-size:11px;color:var(--yellow);margin-bottom:12px">'
+        +'Nota: The Odds API solo muestra cuotas cuando las casas ya han abierto mercados para ese partido (normalmente 1-7 dias antes del partido). '
+        +'Es normal que haya 0 partidos si consultas fuera de los dias de juego.'
+        +'</div>'
+        +'<div style="text-align:center"><button onclick="lAll()" style="padding:10px 24px;background:var(--abg);border:1px solid var(--abr);border-radius:var(--rs);color:var(--blue);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Actualizar ahora</button></div>';
+    }
+  }
   var evs=filtEv(),anls=[];evs.forEach(function(ev){var a=aEv(ev);if(a)anls.push({ev:ev,a:a});});
   var sugs=A.ok?A.sugs:bSugs(evs);
   var hc=anls.filter(function(x){return x.a.mkts[0]&&x.a.mkts[0].prob>=0.65;}).length;
@@ -739,7 +805,7 @@ function rTracker(){
     +'<button onclick="addBetM()" style="margin-top:14px;padding:9px 20px;background:var(--abg);border:1px solid var(--abr);border-radius:var(--rs);color:var(--blue);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">+ Anadir pick</button></div>');}
 
 /* NAV & ACTIONS */
-function G(t){A.tab=t;document.querySelectorAll('.ntab').forEach(function(x){x.classList.remove('on');});var el=document.getElementById('nt-'+t);if(el)el.classList.add('on');render();if(t==='news'&&!A.news)lNews();}
+function G(t){A.tab=t;document.querySelectorAll('.ntab').forEach(function(x){x.classList.remove('on');});var el=document.getElementById('nt-'+t);if(el)el.classList.add('on');render();if(t==='news'&&!A.news)lNews();if(t==='hot')lAll();}
 function navHC(){A.minP=65;A.cat='all';A.ptab='picks';G('picks');}
 function toggle(id){A.exp=A.exp===id?null:id;render();}
 function upd(){var d=document.getElementById('sdot'),t=document.getElementById('stxt');if(!d||!t)return;d.className='sdot '+(A.ok?'live':A.okey?'err':'demo');t.textContent=A.ok?(A.fdok?'En vivo (2 fuentes)':'En vivo'):(A.okey?'Key error':'Demo');}
@@ -782,7 +848,7 @@ function updB(i,r){A.bets[i].r=r;localStorage.setItem('biq_bets',JSON.stringify(
 function delB(i){A.bets.splice(i,1);localStorage.setItem('biq_bets',JSON.stringify(A.bets));render();}
 
 function render(){var v=document.getElementById('V');if(!v)return;
-  try{if(A.tab==='dash')v.innerHTML=rDash();else if(A.tab==='chile')v.innerHTML=rChile();else if(A.tab==='picks')v.innerHTML=rPicks();else if(A.tab==='odds')v.innerHTML=rOdds();else if(A.tab==='scores')v.innerHTML=rScores();else if(A.tab==='news')v.innerHTML=rNews();else if(A.tab==='tracker')v.innerHTML=rTracker();}
+  try{if(A.tab==='dash')v.innerHTML=rDash();else if(A.tab==='chile')v.innerHTML=rChile();else if(A.tab==='picks')v.innerHTML=rPicks();else if(A.tab==='odds')v.innerHTML=rOdds();else if(A.tab==='scores')v.innerHTML=rScores();else if(A.tab==='news')v.innerHTML=rNews();else if(A.tab==='hot')v.innerHTML=rHot();else if(A.tab==='tracker')v.innerHTML=rTracker();}
   catch(e){v.innerHTML='<div class="notice info">Error: '+e.message+'</div>';console.error(e);}}
 
 /* INIT */
