@@ -191,6 +191,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;background:va
   <button class="ntab"    id="nt-scores"  onclick="G('scores')">📊 Resultados</button>
   <button class="ntab"    id="nt-news"    onclick="G('news')">📰 Noticias</button>
   <button class="ntab"    id="nt-hot"     onclick="G('hot')">🔥 Hot</button>
+  <button class="ntab"    id="nt-tracker" onclick="G('tracker')">🎯 Tracker</button>
 </nav>
 <div class="view" id="V"></div>
 
@@ -230,7 +231,7 @@ var A={tab:'dash',ok:false,fdok:false,okey:localStorage.getItem('biq_ok')||'',fd
   sport:'soccer_chile_campeonato',mkt:'h2h',cat:'all',minP:0,exp:null,
   ptab:'picks',stab:'tabla',tf:'week',
   bets:JSON.parse(localStorage.getItem('biq_bets')||'[]'),
-  load:{},err:{},news:null,lr:null};
+  load:{},err:{},news:null,lr:null,espn:null};
 
 var SC={'soccer_fifa_world_cup':{n:'Mundial FIFA 2026',g:'Mundial',r:'eu'},
   'soccer_chile_campeonato':{n:'Primera Division CL',g:'Sudamerica',r:'eu'},
@@ -434,7 +435,7 @@ function bSugs(evs){
     a.mkts.forEach(function(mk){if(mk.prob>=0.60)pool.push({evId:ev.id,match:ev.home_team+' vs '+ev.away_team,
       home:ev.home_team,away:ev.away_team,league:(SC[ev.sport_key]||{}).n||ev.sport_key,
       group:(SC[ev.sport_key]||{}).g||'Otros',date:fmtD(ev.commence_time),
-      cat:mk.cat,pred:mk.name,prob:mk.prob,rk:mk.rk,sig:mk.sig,reason:bReason(ev,mk,a),an:a,ev:ev});});});
+      cat:mk.cat,key:mk.key,pred:mk.name,prob:mk.prob,rk:mk.rk,sig:mk.sig,reason:bReason(ev,mk,a),an:a,ev:ev});});});
   pool.sort(function(a,b){return b.prob-a.prob;});
   var mc={},out=[];pool.forEach(function(p){if(!mc[p.evId]&&out.length<10){mc[p.evId]=1;out.push(p);}});
   /* Si no hay cuotas reales, complementar con señales de football-data */
@@ -477,6 +478,63 @@ function bCombis(evs){
 
 /* HELPERS */
 function p0(v){return (v*100).toFixed(0);}function p1(v){return (v*100).toFixed(1);}
+
+/* Veredicto claro: que apostar exactamente */
+function advTxt(s){
+  var k=s.key,h=s.home||'',a=s.away||'';
+  if(k==='home')return 'APUESTA: GANA '+h.toUpperCase();
+  if(k==='away')return 'APUESTA: GANA '+a.toUpperCase();
+  if(k==='draw')return 'APUESTA: EMPATE';
+  if(k==='btts')return 'APUESTA: AMBOS EQUIPOS MARCAN';
+  if(k==='o15')return 'APUESTA: MAS DE 1.5 GOLES';
+  if(k==='o25')return 'APUESTA: MAS DE 2.5 GOLES';
+  if(k==='o35')return 'APUESTA: MAS DE 3.5 GOLES';
+  if(k==='c85')return 'APUESTA: MAS DE 8.5 CORNERS';
+  if(k==='dc_h')return 'APUESTA: '+h.toUpperCase()+' NO PIERDE (1X)';
+  if(k==='dc_a')return 'APUESTA: '+a.toUpperCase()+' NO PIERDE (X2)';
+  return 'APUESTA: '+(s.pred||'').toUpperCase();}
+
+/* Mejor cuota disponible para un pick */
+function bestOddsPick(ev,key){
+  var best=null;
+  (ev.bookmakers||[]).forEach(function(b){(b.markets||[]).forEach(function(m){
+    if(m.key==='h2h'&&(key==='home'||key==='away'||key==='draw')){
+      m.outcomes.forEach(function(o){
+        var ok=(o.name===ev.home_team&&key==='home')||(o.name===ev.away_team&&key==='away')||(o.name==='Draw'&&key==='draw');
+        if(ok&&(!best||o.price>best.price))best={price:o.price,bookie:b.key,title:b.title};});}
+    if(m.key==='totals'&&(key==='o25'||key==='o15'||key==='o35')){
+      var pt=key==='o15'?1.5:key==='o35'?3.5:2.5;
+      m.outcomes.forEach(function(o){
+        if(o.name==='Over'&&o.point===pt&&(!best||o.price>best.price))best={price:o.price,bookie:b.key,title:b.title};});}
+  });});
+  return best;}
+
+/* Senales desde football-data cuando faltan cuotas (funcion que faltaba y rompia los filtros) */
+function signalsFromFD(){
+  var out=[];
+  Object.keys(A.fds).forEach(function(c){
+    var tbl=A.fds[c]||[];
+    tbl.forEach(function(r){
+      var f=r.form||'',w=(f.match(/W/g)||[]).length,l=(f.match(/L/g)||[]).length;
+      if(w>=4&&r.position<=6&&out.length<6){
+        var tn=(r.team&&r.team.name)||'Equipo';
+        out.push({evId:'fd_'+c+'_'+r.position,match:tn,home:tn,away:'',key:'home',
+          league:c,group:'Tendencias',date:'Forma reciente',cat:'1X2',
+          pred:'Tendencia ganadora: '+tn,prob:Math.min(0.78,0.58+w*0.04),
+          rk:'y',sig:'ES',reason:'Racha de '+w+' victorias en ultimos 5 ('+f+'). Posicion '+r.position+' con '+r.points+' pts. Sin cuotas activas aun.',an:null,ev:null});}
+    });});
+  return out;}
+
+/* Links a portales externos para complementar el analisis */
+function extLinks(h,a){
+  var q=encodeURIComponent(h+(a?' vs '+a:''));
+  var links=[
+    ['SofaScore','https://www.sofascore.com/search?q='+q],
+    ['Flashscore','https://www.flashscore.cl/'],
+    ['Pronostico','https://www.google.com/search?q='+q+'+pronostico+apuestas'],
+    ['Stats corners','https://www.google.com/search?q='+q+'+estadisticas+corners']];
+  return '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px">'
+    +links.map(function(x){return '<a href="'+x[1]+'" target="_blank" rel="noopener" style="padding:4px 10px;border-radius:14px;font-size:9px;font-weight:600;background:var(--bg4);border:1px solid var(--b2);color:var(--t2);text-decoration:none">🔗 '+x[0]+'</a>';}).join('')+'</div>';}
 function rC(r){return r==='g'?'var(--green)':r==='y'?'var(--yellow)':'var(--red)';}
 function rL(r){return r==='g'?'Bajo':r==='y'?'Medio':'Alto';}
 function sL(s){return s==='AP'?'APOSTAR':s==='ES'?'ESPERAR':'EVITAR';}
@@ -497,7 +555,9 @@ function sBar(){return '<div class="src-bar"><div class="src '+(A.ok?'ok':'off')
   +'<div class="src '+(A.fdok?'ok':'off')+'">football-data.org '+(A.fdok?'activa':'inactiva')+'</div></div>';}
 function tBar(){var opts=[['week','Esta semana'],['2weeks','2 semanas'],['month','Este mes'],['all','Todo']];
   return '<div class="tbar"><span class="tbar-l">Periodo:</span>'
-    +opts.map(function(o){return '<button class="tc'+(A.tf===o[0]?' on':'')+'" onclick="A.tf=\''+o[0]+'\';render()">'+o[1]+'</button>';}).join('')+'</div>';}
+    +opts.map(function(o){return '<button class="tc'+(A.tf===o[0]?' on':'')+'" onclick="setF(\'tf\',\''+o[0]+'\')">'+o[1]+'</button>';}).join('')+'</div>';}
+function setF(k,v){A[k]=v;render();}
+function resetF(){A.cat='all';A.minP=0;A.tf='week';render();}
 function rb(cb){return '<button class="rbtn" onclick="'+cb+'">&#8635; Actualizar</button>';}
 
 function pBest(ev,mk){
@@ -570,9 +630,15 @@ function sugH(s,top){
     +'<div style="font-size:10px;color:var(--t3);margin-top:2px">'+s.league+' - '+s.date+'</div>'
     +'<div style="margin-top:5px"><span class="bdg '+s.rk+'">'+rL(s.rk)+' riesgo</span></div></div>'
     +'<div style="text-align:right;flex-shrink:0"><div class="sug-pct" style="color:'+rC(s.rk)+'">'+p0(s.prob)+'%</div></div></div>'
-    +'<div class="sug-box"><div style="font-size:14px;font-weight:700;margin-bottom:3px">'+s.pred+'</div>'
-    +'<div style="font-size:10px;color:var(--blue);font-weight:600;margin-bottom:4px">'+s.cat+'</div>'
-    +'<div style="font-size:11px;color:var(--t2);line-height:1.65">'+s.reason+'</div></div>'
+    +(function(){
+      var bo=s.ev?bestOddsPick(s.ev,s.key):null;
+      var oddsTxt=bo?'<span style="font-size:11px;color:var(--yellow);font-weight:700;margin-left:8px">Cuota '+bo.price.toFixed(2)+' ('+BK(bo.bookie).l+')</span>':'';
+      return '<div class="sug-box" style="border-left:3px solid '+rC(s.rk)+'">'
+        +'<div style="font-size:13px;font-weight:800;color:'+(s.sig==='AP'?'var(--green)':s.sig==='ES'?'var(--yellow)':'var(--red)')+';margin-bottom:3px">'
+        +(s.sig==='AP'?'✅ ':'⚠️ ')+advTxt(s)+oddsTxt+'</div>'
+        +'<div style="font-size:10px;color:var(--blue);font-weight:600;margin-bottom:4px">'+s.cat+' · '+s.pred+'</div>'
+        +'<div style="font-size:11px;color:var(--t2);line-height:1.65">'+s.reason+'</div>'
+        +(s.home&&s.away?extLinks(s.home,s.away):'')+'</div>';})()
     +'<div class="pb"><div class="pbf" style="width:'+p0(s.prob)+'%;background:'+rC(s.rk)+'"></div></div>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">'
     +'<span class="sig '+s.sig+'">'+sL(s.sig)+'</span>'
@@ -673,7 +739,7 @@ function rChile(){
   var evs=filtEv().filter(function(e){return e.sport_key==='soccer_chile_campeonato';});
   var tab=A.stab||'tabla';
   var sw='<div class="tsw">'+[['tabla','Tabla'],['partidos','Partidos'],['picks','Picks']].map(function(x){
-    return '<button class="tsw-btn'+(tab===x[0]?' on':'')+'" onclick="A.stab=\''+x[0]+'\';render()">'+x[1]+'</button>';}).join('')+'</div>';
+    return '<button class="tsw-btn'+(tab===x[0]?' on':'')+'" onclick="setF(\'stab\',\''+x[0]+'\')">'+x[1]+'</button>';}).join('')+'</div>';
   var body='';
   if(tab==='tabla'){
     body='<div class="card" style="overflow:auto"><table class="cht"><thead><tr><th>#</th><th>Equipo</th><th>PJ</th><th>G</th><th>E</th><th>P</th><th>GD</th><th>PTS</th><th>Forma</th></tr></thead><tbody>'
@@ -688,22 +754,48 @@ function rChile(){
   }else{var s=bSugs(evs);body=s.length?s.map(function(sg,i){return sugH(sg,i===0);}).join(''):'<div class="empty"><div class="ei">💡</div><div class="et">Sin picks Chile</div></div>';}
   return '<div class="sh"><div class="sh-t">Liga Chilena</div>'+rb('lSport(\'soccer_chile_campeonato\').then(render)')+'</div>'+uBar()+tBar()+sw+body;}
 
+function verdict(sugs){
+  if(!sugs.length)return '';
+  var cats=[['1X2','🏆','Ganador'],['Goles','⚽','Goles'],['BTTS','🥅','Ambos anotan'],['Corners','🚩','Corners'],['DC','🛡️','Doble oport.']];
+  var rows=cats.map(function(c){
+    var s=null;for(var i=0;i<sugs.length;i++){if(sugs[i].cat===c[0]){s=sugs[i];break;}}
+    if(!s)return '';
+    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--b1)">'
+      +'<span style="font-size:15px;flex-shrink:0">'+c[1]+'</span>'
+      +'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:800;color:var(--green)">'+advTxt(s)+'</div>'
+      +'<div style="font-size:10px;color:var(--t3);margin-top:2px">'+s.match+' · '+s.league+'</div></div>'
+      +'<div style="font-size:15px;font-weight:800;color:'+rC(s.rk)+';flex-shrink:0">'+p0(s.prob)+'%</div></div>';
+  }).join('');
+  if(!rows)return '';
+  return '<div style="background:linear-gradient(135deg,var(--gbg),rgba(0,230,118,.02));border:1px solid var(--gbr);border-radius:var(--r);padding:14px 16px;margin-bottom:14px">'
+    +'<div style="font-size:11px;font-weight:800;color:var(--green);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">💥 A que apostar hoy</div>'
+    +'<div style="font-size:10px;color:var(--t3);margin-bottom:6px">La mejor apuesta de cada mercado segun el modelo</div>'
+    +rows+'</div>';}
+
 function rPicks(){
   var evs=filtEv(),sugs=bSugs(evs),combis=bCombis(evs),tab=A.ptab||'picks';
-  var sw='<div class="tsw"><button class="tsw-btn'+(tab==='picks'?' on':'')+'" onclick="A.ptab=\'picks\';render()">Picks</button>'
-    +'<button class="tsw-btn'+(tab==='combis'?' on':'')+'" onclick="A.ptab=\'combis\';render()">Combinadas</button>'
-    +'<button class="tsw-btn'+(tab==='partidos'?' on':'')+'" onclick="A.ptab=\'partidos\';render()">Partidos</button></div>';
+  var sw='<div class="tsw"><button class="tsw-btn'+(tab==='picks'?' on':'')+'" onclick="setF(\'ptab\',\'picks\')">Picks</button>'
+    +'<button class="tsw-btn'+(tab==='combis'?' on':'')+'" onclick="setF(\'ptab\',\'combis\')">Combinadas</button>'
+    +'<button class="tsw-btn'+(tab==='partidos'?' on':'')+'" onclick="setF(\'ptab\',\'partidos\')">Partidos</button></div>';
   var chips=[['all','Todos'],['1X2','1X2'],['Goles','Goles'],['BTTS','BTTS'],['Corners','Corners'],['DC','DC']].map(function(x){
-    return '<button class="chip'+(A.cat===x[0]?' on':'')+'" onclick="A.cat=\''+x[0]+'\';render()">'+x[1]+'</button>';}).join('');
+    return '<button class="chip'+(A.cat===x[0]?' on':'')+'" onclick="setF(\'cat\',\''+x[0]+'\')">'+x[1]+'</button>';}).join('');
   if(tab==='picks'){
     var f=sugs.filter(function(s){return (A.cat==='all'||s.cat===A.cat)&&s.prob*100>=A.minP;});
-    return '<div class="sh"><div class="sh-t">Picks</div>'+rb('lAll()')+'</div>'+uBar()+tBar()+sw+'<div class="chips">'+chips+'</div>'
-      +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">'
+    var fnote=(A.cat!=='all'||A.minP>0)?'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:10px;color:var(--t3)">'
+      +'<span>Filtros activos: '+(A.cat!=='all'?A.cat+' · ':'')+'min '+A.minP+'% · '+f.length+' de '+sugs.length+' picks</span>'
+      +'<button onclick="resetF()" style="background:none;border:none;color:var(--blue);font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">✕ Limpiar filtros</button></div>':'';
+    return '<div class="sh"><div class="sh-t">Picks</div>'+rb('lAll()')+'</div>'+uBar()+tBar()+sw
+      +verdict(f)
+      +'<div class="chips">'+chips+'</div>'
+      +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
       +'<span style="font-size:11px;color:var(--t2)">Prob. min:</span>'
       +'<input type="range" min="0" max="75" step="5" value="'+A.minP+'" style="flex:1"'
-      +' oninput="A.minP=parseInt(this.value);document.getElementById(\'pl\').textContent=this.value+\'%\';render()">'
+      +' oninput="document.getElementById(\'pl\').textContent=this.value+\'%\'"'
+      +' onchange="setF(\'minP\',parseInt(this.value))">'
       +'<span id="pl" style="font-size:12px;font-weight:700;color:var(--blue);min-width:34px">'+A.minP+'%</span></div>'
-      +(f.length?f.map(function(s,i){return sugH(s,i===0);}).join(''):'<div class="empty"><div class="ei">🔍</div><div class="et">Sin picks con ese filtro</div></div>');}
+      +fnote
+      +(f.length?f.map(function(s,i){return sugH(s,i===0);}).join(''):'<div class="empty"><div class="ei">🔍</div><div class="et">Sin picks con ese filtro</div>'
+        +'<button onclick="resetF()" style="margin-top:12px;padding:8px 18px;background:var(--abg);border:1px solid var(--abr);border-radius:var(--rs);color:var(--blue);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">Limpiar filtros</button></div>');}
   if(tab==='combis'){
     return '<div class="sh"><div class="sh-t">Combinadas</div>'+rb('lAll()')+'</div>'+uBar()+tBar()+sw
       +(combis.length?combis.map(cmbH).join(''):'<div class="empty"><div class="ei">🎰</div><div class="et">Sin combinadas disponibles</div><div class="es">Necesitas 2+ partidos por region.</div></div>');}
@@ -783,6 +875,105 @@ function defNews(){return[
   {title:'U. de Chile ficha delantero argentino para el ataque',tag:'Liga Chile',summary:'El ariete ex Huracan llega libre y firma hasta diciembre de 2027.',time:'hace 1 dia'},
   {title:'River Plate y Palmeiras van a la final de la Libertadores',tag:'Libertadores',summary:'Los dos finalistas se definen tras eliminar a Estudiantes y Atletico Mineiro.',time:'hace 1 dia'}];}
 
+/* ── HOT: value bets + fuentes externas ── */
+var ESPNL=[['chi.1','Primera Chile'],['fifa.world','Mundial 2026'],['conmebol.libertadores','Libertadores'],
+  ['arg.1','Liga Argentina'],['bra.1','Brasileirao'],['eng.1','Premier League'],['esp.1','La Liga']];
+function lESPN(){
+  if(A.load.espn)return;
+  A.load.espn=true;A.espn={};if(A.tab==='hot')render();
+  var done=0;
+  function one(){done++;if(done===ESPNL.length){A.load.espn=false;if(A.tab==='hot')render();}}
+  ESPNL.forEach(function(l){
+    fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/'+l[0]+'/scoreboard')
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(d){if(d&&d.events&&d.events.length)A.espn[l[0]]={n:l[1],ev:d.events};one();})
+      .catch(function(){one();});});}
+
+function hotValue(){
+  var out=[],evs=allEv();
+  evs.forEach(function(ev){
+    var a=aEv(ev);if(!a)return;
+    a.mkts.forEach(function(mk){
+      var bo=bestOddsPick(ev,mk.key);if(!bo)return;
+      var val=mk.prob*bo.price-1;
+      if(val>0.02&&mk.prob>=0.40)out.push({ev:ev,mk:mk,bo:bo,val:val,
+        match:ev.home_team+' vs '+ev.away_team,home:ev.home_team,away:ev.away_team,
+        league:(SC[ev.sport_key]||{}).n||ev.sport_key,date:fmtD(ev.commence_time),key:mk.key,pred:mk.name,cat:mk.cat,prob:mk.prob,rk:mk.rk,sig:mk.sig});});});
+  out.sort(function(a,b){return b.val-a.val;});
+  var seen={},ded=[];out.forEach(function(x){if(!seen[x.ev.id]&&ded.length<6){seen[x.ev.id]=1;ded.push(x);}});
+  return ded;}
+
+function hotSoon(){
+  var now=Date.now(),out=[];
+  allEv().forEach(function(ev){
+    var t=new Date(ev.commence_time).getTime();
+    if(t<now-2*3600000||t>now+12*3600000)return;
+    var a=aEv(ev);if(!a||!a.mkts[0])return;
+    out.push({ev:ev,mk:a.mkts[0],t:t});});
+  out.sort(function(a,b){return a.t-b.t;});
+  return out.slice(0,5);}
+
+function rHot(){
+  if(A.ok&&A.load.all)return '<div class="lwrap"><div class="spin"></div><div class="ltxt">Buscando oportunidades...</div></div>';
+  var vals=hotValue(),soon=hotSoon();
+  var demo=!A.ok?'<div class="notice warn">Modo demo: conecta tu Odds API key en ⚙ Keys para value bets reales.</div>':'';
+  /* VALUE BETS */
+  var vh=vals.length?vals.map(function(v,i){
+    return '<div class="sug'+(i===0?' top':'')+'">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:10px">'
+      +'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700">'+v.match+'</div>'
+      +'<div style="font-size:10px;color:var(--t3);margin-top:2px">'+v.league+' · '+v.date+'</div></div>'
+      +'<div style="text-align:right;flex-shrink:0"><div style="font-size:10px;color:var(--t3)">Valor</div>'
+      +'<div style="font-size:20px;font-weight:800;color:var(--green)">+'+(v.val*100).toFixed(1)+'%</div></div></div>'
+      +'<div class="sug-box" style="border-left:3px solid var(--green)">'
+      +'<div style="font-size:13px;font-weight:800;color:var(--green)">🔥 '+advTxt(v)
+      +'<span style="font-size:11px;color:var(--yellow);font-weight:700;margin-left:8px">Cuota '+v.bo.price.toFixed(2)+' ('+BK(v.bo.bookie).l+')</span></div>'
+      +'<div style="font-size:11px;color:var(--t2);line-height:1.6;margin-top:4px">Modelo: '+p0(v.prob)+'% de probabilidad. La cuota implica solo '+(100/v.bo.price).toFixed(0)+'%. La casa esta pagando de mas segun el modelo.</div>'
+      +extLinks(v.home,v.away)+'</div>'
+      +'<div style="display:flex;justify-content:flex-end;margin-top:6px">'
+      +'<button onclick="addBet(\''+v.match.replace(/'/g,'')+'\',\''+v.pred.replace(/'/g,'')+'\','+v.prob.toFixed(3)+')" style="padding:5px 11px;background:var(--abg);border:1px solid var(--abr);border-radius:8px;color:var(--blue);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">+ Tracker</button></div></div>';
+  }).join(''):'<div class="empty"><div class="ei">🔎</div><div class="et">Sin value bets ahora</div><div class="es">El modelo no detecta cuotas pagando de mas en este momento.</div></div>';
+  /* EMPIEZAN PRONTO */
+  var sh=soon.length?soon.map(function(s){
+    var ev=s.ev,mk=s.mk,mins=Math.round((s.t-Date.now())/60000);
+    var when=mins<=0?'🔴 En juego':mins<60?'⏰ En '+mins+' min':'⏰ En '+Math.round(mins/60)+' h';
+    return '<div class="sc-card"><div style="display:flex;justify-content:space-between;margin-bottom:6px">'
+      +'<div style="font-size:10px;color:var(--t3)">'+((SC[ev.sport_key]||{}).n||'')+'</div>'
+      +'<div style="font-size:10px;font-weight:700;color:var(--yellow)">'+when+'</div></div>'
+      +'<div style="font-size:13px;font-weight:700;margin-bottom:5px">'+ev.home_team+' vs '+ev.away_team+'</div>'
+      +'<div style="font-size:11px;font-weight:700;color:'+rC(mk.rk)+'">'+advTxt({key:mk.key,home:ev.home_team,away:ev.away_team,pred:mk.name})+' · '+p0(mk.prob)+'%</div></div>';
+  }).join(''):'';
+  /* ESPN */
+  var eh='';
+  if(A.load.espn)eh='<div class="lwrap" style="padding:30px 20px"><div class="spin"></div><div class="ltxt">Cargando ESPN...</div></div>';
+  else if(A.espn&&Object.keys(A.espn).length){
+    eh=Object.keys(A.espn).map(function(k){
+      var lg=A.espn[k];
+      var rows=lg.ev.slice(0,4).map(function(e){
+        try{
+          var c=e.competitions[0],cs=c.competitors||[];
+          var hm=cs.find(function(x){return x.homeAway==='home';})||cs[0]||{};
+          var aw=cs.find(function(x){return x.homeAway==='away';})||cs[1]||{};
+          var st=(e.status&&e.status.type&&e.status.type.shortDetail)||'';
+          var live=e.status&&e.status.type&&e.status.type.state==='in';
+          var sc=(hm.score!==undefined&&aw.score!==undefined&&e.status.type.state!=='pre')?(hm.score+' - '+aw.score):'vs';
+          return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--b1);font-size:11px">'
+            +'<div style="flex:1;font-weight:600;text-align:right;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+((hm.team&&hm.team.shortDisplayName)||'?')+'</div>'
+            +'<div style="font-weight:800;color:'+(live?'var(--green)':'var(--blue)')+';flex-shrink:0;padding:0 4px">'+sc+'</div>'
+            +'<div style="flex:1;font-weight:600;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+((aw.team&&aw.team.shortDisplayName)||'?')+'</div>'
+            +'<div style="font-size:9px;color:'+(live?'var(--green)':'var(--t3)')+';flex-shrink:0;max-width:70px;text-align:right">'+st+'</div></div>';
+        }catch(err){return '';}}).join('');
+      return rows?'<div class="card cp" style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:4px">'+lg.n+'</div>'+rows+'</div>':'';
+    }).join('');
+    if(!eh)eh='<div class="notice info">ESPN sin partidos programados hoy en las ligas seguidas.</div>';
+  }else{
+    eh='<div class="notice info">Fuente externa no disponible ahora. <span style="text-decoration:underline;cursor:pointer" onclick="lESPN()">Reintentar</span></div>';}
+  return demo+'<div class="sh"><div class="sh-t">🔥 Hot - Oportunidades</div>'+rb('if(A.ok)lAll();lESPN()')+'</div>'+uBar()+sBar()
+    +'<div class="sh" style="margin-top:4px"><div class="sh-t">Value bets (cuota paga de mas)</div></div>'+vh
+    +(sh?'<div class="sh" style="margin-top:14px"><div class="sh-t">Empiezan pronto</div></div>'+sh:'')
+    +'<div class="sh" style="margin-top:14px"><div class="sh-t">🌐 Marcadores ESPN (fuente externa gratis)</div></div>'+eh
+    +'<div style="font-size:9px;color:var(--t3);margin-top:14px;text-align:center;line-height:1.6">Analisis estadistico, no garantiza resultados. Apuesta con responsabilidad.</div>';}
+
 function rTracker(){
   var bets=A.bets,won=bets.filter(function(b){return b.r==='W';}).length;
   var lost=bets.filter(function(b){return b.r==='L';}).length,pend=bets.filter(function(b){return b.r==='P';}).length;
@@ -805,7 +996,7 @@ function rTracker(){
     +'<button onclick="addBetM()" style="margin-top:14px;padding:9px 20px;background:var(--abg);border:1px solid var(--abr);border-radius:var(--rs);color:var(--blue);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">+ Anadir pick</button></div>');}
 
 /* NAV & ACTIONS */
-function G(t){A.tab=t;document.querySelectorAll('.ntab').forEach(function(x){x.classList.remove('on');});var el=document.getElementById('nt-'+t);if(el)el.classList.add('on');render();if(t==='news'&&!A.news)lNews();if(t==='hot')lAll();}
+function G(t){A.tab=t;document.querySelectorAll('.ntab').forEach(function(x){x.classList.remove('on');});var el=document.getElementById('nt-'+t);if(el)el.classList.add('on');render();if(t==='news'&&!A.news)lNews();if(t==='hot'){if(A.ok&&!A.lr&&!A.load.all)lAll();if(!A.espn&&!A.load.espn)lESPN();}}
 function navHC(){A.minP=65;A.cat='all';A.ptab='picks';G('picks');}
 function toggle(id){A.exp=A.exp===id?null:id;render();}
 function upd(){var d=document.getElementById('sdot'),t=document.getElementById('stxt');if(!d||!t)return;d.className='sdot '+(A.ok?'live':A.okey?'err':'demo');t.textContent=A.ok?(A.fdok?'En vivo (2 fuentes)':'En vivo'):(A.okey?'Key error':'Demo');}
